@@ -1,6 +1,7 @@
 # go
 go.sum
 tmp/
+.air.toml
 
 # python
 .venv/
