@@ -1,6 +1,8 @@
 package templates
 
 import (
+	"gavrh/sense/views"
+
 	"html/template"
 	"io"
 
@@ -25,8 +27,8 @@ func NewTemplate() *Templates {
 		"sub": func(a, b int) int { return a - b },
 	}
 
-	return &Templates {
-		Templates: template.Must(template.New("views").Funcs(funcs).ParseGlob("views/*.html")),
+	return &Templates{
+		Templates: template.Must(template.New("views").Funcs(funcs).ParseFS(views.FS, "*.html")),
 	}
 }
 
