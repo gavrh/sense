@@ -1,21 +1,16 @@
 package handlers
 
 import (
-	"gavrh/sense/handlers/getHandlers"
+	"net/http"
 
 	"github.com/labstack/echo/v5"
 )
 
 func HandleGet(c *echo.Context) error {
+	// temp while we have no favicon.ico
+	if c.Param("path") == "favicon.ico" {
+		return nil
+	}
 
-    path := c.Param("path")
-
-    switch path {
-        // temp while has no favicon.ico
-        case "favicon.ico":
-            return nil
-
-    }
-    
-    return getHandlers.HandleGetDefault(c)
+	return c.Redirect(http.StatusSeeOther, "/")
 }

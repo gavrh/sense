@@ -7,7 +7,6 @@ import (
 )
 
 func HandleRequests(e *echo.Echo) {
-
-	e.GET("/", func (c *echo.Context) error { return getHandlers.HandleGetDefault(c) })
-
+	e.GET("/", getHandlers.HandleGetDefault)
+	e.GET("/:path", HandleGet)
 }
