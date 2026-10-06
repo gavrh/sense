@@ -18,10 +18,91 @@
         -->
     </head>
     <body id="body">
-        <div>
-            <input
-                placeholder="Search anything">
-            </input>
+        <div class="
+            w-full
+            h-dvh
+            flex
+            flex-col
+            max-w-[800px]
+            mx-auto
+            px-[20px]
+            "
+        >
+            <!-- top / searchbar -->
+            <div class="
+                w-full
+                h-fit
+                pt-[5%]
+                pb-[20px]
+                flex
+                flex-col
+                gap-[15px]
+                items-center
+                "
+            >
+                <p class="text-8xl font-semibold">
+                    sense
+                </p>
+
+                <p class="text-xl">
+                    System One Search Engine
+                </p>
+
+                <form class="w-full flex" onsubmit="event.preventDefault(); this.reset(); console.log('submitting form');">
+                    <textarea 
+                        rows="1" 
+                        class="
+                        min-w-full
+                        max-w-full
+                        p-2
+                        field-sizing-content
+                        resize-none
+                        rounded-md
+                        border-[1px]
+                        focus:outline-none
+                        "
+                        onkeydown="if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); this.form.requestSubmit(); }"
+                        placeholder="What do you want to know?"
+                    ></textarea>
+                    <button
+                        class="min-w-[25px] aspect-square bg-red-500"
+                        onclick="event.preventDefault(); this.form.requestSubmit();"
+                    >
+                        test
+                    </button>
+                </form>
+            </div>
+
+            <!-- results -->
+            <div class="w-ful h-fit bg-blue-500 flex-1">
+                {{ range .Result }}
+                {{ template "result" . }}
+                {{ end }}
+            </div>
+
+            <div class="flex justify-between text-zinc-500">
+                <p>
+                    &copy All rights reserved
+                    <span>
+                        <a
+                            class="
+                            text-emerald-700
+                            hover:underline
+                            "
+                            href="https://gavrh.com" target="_blank"
+                        >Gavin Holmes</a>
+                    </span>
+                </p>
+                <p>
+                    <a class="
+                        text-emerald-700
+                        hover:underline
+                        "
+                        href="https://github.com/gavrh/sense" target="_blank"
+                    >Source</a>
+                    <span>(AGPL-3.0)</span>
+                </p>
+            </div>
         </div>
     </body>
 </html>
