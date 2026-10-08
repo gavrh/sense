@@ -1,5 +1,6 @@
 {{ block "result" . }}
-<div>
-    {{ .Name }}
+<div class="result">
+    <a href="{{ .SourceURL }}">{{ .SourceTitle }}</a>
+    <p>{{ .Answer }}</p>
 </div>
 {{ end }}

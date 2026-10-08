@@ -74,11 +74,7 @@
             </div>
 
             <!-- results -->
-            <div class="w-ful h-fit bg-blue-500 flex-1">
-                {{ range .Result }}
-                {{ template "result" . }}
-                {{ end }}
-            </div>
+            <div id="results" class="w-full h-fit flex-1"></div>
 
             <div class="flex justify-between text-zinc-500">
                 <p>

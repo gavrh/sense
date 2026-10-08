@@ -1,13 +1,13 @@
 package templates
 
 type IndexTemplate struct {
-	AccountId string
-	UserLogin string
+	AccountId   string
+	UserLogin   string
 	MainDisplay MainTemplate
 }
 
 func NewIndexTemplate(mainDisplay MainTemplate) IndexTemplate {
-	return IndexTemplate {
+	return IndexTemplate{
 		MainDisplay: mainDisplay,
 	}
 }

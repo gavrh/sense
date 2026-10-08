@@ -33,5 +33,7 @@ func NewTemplate() *Templates {
 }
 
 const (
-	Index = "index"
+	Index   = "index"
+	Result  = "result"
+	Message = "message"
 )
