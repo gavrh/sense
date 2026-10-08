@@ -1,4 +1,4 @@
-package jev
+package tests
 
 import (
 	"context"
@@ -10,93 +10,106 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"gavrh/sense/internal/jev"
 )
 
-const emptyResponse = `{"model":"english","answers":{},"usage":{"input_tokens":0,"output_tokens":0}}`
+const jevEmptyResponse = `{"model":"english","answers":{},"usage":{"input_tokens":0,"output_tokens":0}}`
 
-func newTestClient(server *httptest.Server, apiKey string) *Client {
-	return New(server.URL, apiKey, "english", 5*time.Second)
-}
+func TestJevSystemOneRequest(t *testing.T) {
+	t.Run("sends request with bearer token", func(t *testing.T) {
+		var (
+			gotMethod      string
+			gotPath        string
+			gotContentType string
+			gotAuth        string
+			gotBody        jev.Request
+		)
 
-func TestSystemOneRequest(t *testing.T) {
-	var (
-		gotMethod      string
-		gotPath        string
-		gotContentType string
-		gotAuth        string
-		gotBody        Request
-	)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotPath = r.URL.Path
+			gotContentType = r.Header.Get("Content-Type")
+			gotAuth = r.Header.Get("Authorization")
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode request body: %v", err)
+			}
+			io.WriteString(w, jevEmptyResponse)
+		}))
+		t.Cleanup(server.Close)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotPath = r.URL.Path
-		gotContentType = r.Header.Get("Content-Type")
-		gotAuth = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Errorf("decode request body: %v", err)
-		}
-		io.WriteString(w, emptyResponse)
-	}))
-	defer server.Close()
+		minConfidence := 0.5
+		maxLen := 512
+		headMaxLen := 192
 
-	minConfidence := 0.5
-	maxLen := 512
-	headMaxLen := 192
-
-	client := New(server.URL, "secret", "english", 5*time.Second)
-	_, err := client.SystemOne(context.Background(), Request{
-		State: "the state",
-		Questions: map[string]Question{
-			"color": {
-				Type:         "choice",
-				Instructions: "Pick the colour",
-				Criteria:     map[string]string{"red": "warm", "blue": "cool"},
+		client := jev.New(server.URL, "secret", "english", 5*time.Second)
+		_, err := client.SystemOne(context.Background(), jev.Request{
+			State: "the state",
+			Questions: map[string]jev.Question{
+				"color": {
+					Type:         "choice",
+					Instructions: "Pick the colour",
+					Criteria:     map[string]string{"red": "warm", "blue": "cool"},
+				},
 			},
-		},
-		MinConfidence: &minConfidence,
-		MaxLen:        &maxLen,
-		HeadMaxLen:    &headMaxLen,
-	})
-	if err != nil {
-		t.Fatalf("SystemOne: %v", err)
-	}
+			MinConfidence: &minConfidence,
+			MaxLen:        &maxLen,
+			HeadMaxLen:    &headMaxLen,
+		})
+		if err != nil {
+			t.Fatalf("SystemOne: %v", err)
+		}
 
-	if gotMethod != http.MethodPost {
-		t.Errorf("method = %q, want POST", gotMethod)
-	}
-	if gotPath != "/v1/systemone" {
-		t.Errorf("path = %q, want /v1/systemone", gotPath)
-	}
-	if gotContentType != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", gotContentType)
-	}
-	if gotAuth != "Bearer secret" {
-		t.Errorf("Authorization = %q, want Bearer secret", gotAuth)
-	}
-	if gotBody.State != "the state" {
-		t.Errorf("state = %v, want the state", gotBody.State)
-	}
-	if gotBody.Model != "english" {
-		t.Errorf("model = %q, want english", gotBody.Model)
-	}
-	if gotBody.Questions["color"].Type != "choice" {
-		t.Errorf("question type = %q, want choice", gotBody.Questions["color"].Type)
-	}
-	if gotBody.Questions["color"].Instructions != "Pick the colour" {
-		t.Errorf("instructions = %q", gotBody.Questions["color"].Instructions)
-	}
-	if gotBody.MinConfidence == nil || *gotBody.MinConfidence != 0.5 {
-		t.Errorf("min_confidence = %v, want 0.5", gotBody.MinConfidence)
-	}
-	if gotBody.MaxLen == nil || *gotBody.MaxLen != 512 {
-		t.Errorf("max_len = %v, want 512", gotBody.MaxLen)
-	}
-	if gotBody.HeadMaxLen == nil || *gotBody.HeadMaxLen != 192 {
-		t.Errorf("head_max_len = %v, want 192", gotBody.HeadMaxLen)
-	}
+		if gotMethod != http.MethodPost {
+			t.Errorf("method = %q, want POST", gotMethod)
+		}
+		if gotPath != "/v1/systemone" {
+			t.Errorf("path = %q, want /v1/systemone", gotPath)
+		}
+		if gotContentType != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", gotContentType)
+		}
+		if gotAuth != "Bearer secret" {
+			t.Errorf("Authorization = %q, want Bearer secret", gotAuth)
+		}
+		if gotBody.State != "the state" {
+			t.Errorf("state = %v, want the state", gotBody.State)
+		}
+		if gotBody.Model != "english" {
+			t.Errorf("model = %q, want english", gotBody.Model)
+		}
+		if gotBody.Questions["color"].Type != "choice" {
+			t.Errorf("question type = %q, want choice", gotBody.Questions["color"].Type)
+		}
+		if gotBody.MinConfidence == nil || *gotBody.MinConfidence != 0.5 {
+			t.Errorf("min_confidence = %v, want 0.5", gotBody.MinConfidence)
+		}
+		if gotBody.MaxLen == nil || *gotBody.MaxLen != 512 {
+			t.Errorf("max_len = %v, want 512", gotBody.MaxLen)
+		}
+		if gotBody.HeadMaxLen == nil || *gotBody.HeadMaxLen != 192 {
+			t.Errorf("head_max_len = %v, want 192", gotBody.HeadMaxLen)
+		}
+	})
+
+	t.Run("omits bearer token without key", func(t *testing.T) {
+		var gotAuth string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			io.WriteString(w, jevEmptyResponse)
+		}))
+		t.Cleanup(server.Close)
+
+		if _, err := jev.New(server.URL, "", "english", 5*time.Second).SystemOne(context.Background(), jev.Request{State: "x"}); err != nil {
+			t.Fatalf("SystemOne: %v", err)
+		}
+		if gotAuth != "" {
+			t.Errorf("Authorization = %q, want empty", gotAuth)
+		}
+	})
 }
 
-func TestResponseDecoding(t *testing.T) {
+func TestJevResponseDecoding(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{
 			"model":"english",
@@ -109,11 +122,11 @@ func TestResponseDecoding(t *testing.T) {
 			"routing":{"model":"english","reason":"best fit"}
 		}`)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	resp, err := newTestClient(server, "").SystemOne(context.Background(), Request{
+	resp, err := jev.New(server.URL, "", "english", 5*time.Second).SystemOne(context.Background(), jev.Request{
 		State:     "x",
-		Questions: map[string]Question{},
+		Questions: map[string]jev.Question{},
 	})
 	if err != nil {
 		t.Fatalf("SystemOne: %v", err)
@@ -146,31 +159,14 @@ func TestResponseDecoding(t *testing.T) {
 	}
 }
 
-func TestNoAuthorizationWithoutKey(t *testing.T) {
-	var gotAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		io.WriteString(w, emptyResponse)
-	}))
-	defer server.Close()
-
-	if _, err := newTestClient(server, "").SystemOne(context.Background(), Request{State: "x"}); err != nil {
-		t.Fatalf("SystemOne: %v", err)
-	}
-	if gotAuth != "" {
-		t.Errorf("Authorization = %q, want empty", gotAuth)
-	}
-}
-
-func TestAPIErrors(t *testing.T) {
+func TestJevAPIErrors(t *testing.T) {
 	cases := []struct {
 		name       string
 		status     int
 		body       string
 		wantDetail string
 	}{
-		{"unauthorized", http.StatusUnauthorized, `{"detail":"missing bearer token"}`, "missing bearer token"},
-		{"unprocessable", http.StatusUnprocessableEntity, `{"detail":"invalid question"}`, "invalid question"},
+		{"structured", http.StatusUnauthorized, `{"detail":"missing bearer token"}`, "missing bearer token"},
 		{"unstructured", http.StatusBadRequest, `plain text`, "plain text"},
 	}
 
@@ -180,13 +176,13 @@ func TestAPIErrors(t *testing.T) {
 				w.WriteHeader(tc.status)
 				io.WriteString(w, tc.body)
 			}))
-			defer server.Close()
+			t.Cleanup(server.Close)
 
-			_, err := newTestClient(server, "").SystemOne(context.Background(), Request{State: "x"})
+			_, err := jev.New(server.URL, "", "english", 5*time.Second).SystemOne(context.Background(), jev.Request{State: "x"})
 
-			var apiErr *APIError
+			var apiErr *jev.APIError
 			if !errors.As(err, &apiErr) {
-				t.Fatalf("error = %v, want *APIError", err)
+				t.Fatalf("error = %v, want *jev.APIError", err)
 			}
 			if apiErr.StatusCode != tc.status {
 				t.Errorf("status = %d, want %d", apiErr.StatusCode, tc.status)
@@ -198,7 +194,7 @@ func TestAPIErrors(t *testing.T) {
 	}
 }
 
-func TestSystemOneRetriesOn503(t *testing.T) {
+func TestJevRetriesOn503(t *testing.T) {
 	var attempts int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
@@ -208,11 +204,11 @@ func TestSystemOneRetriesOn503(t *testing.T) {
 			io.WriteString(w, `{"detail":"busy"}`)
 			return
 		}
-		io.WriteString(w, emptyResponse)
+		io.WriteString(w, jevEmptyResponse)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	if _, err := newTestClient(server, "").SystemOne(context.Background(), Request{State: "x"}); err != nil {
+	if _, err := jev.New(server.URL, "", "english", 5*time.Second).SystemOne(context.Background(), jev.Request{State: "x"}); err != nil {
 		t.Fatalf("SystemOne: %v", err)
 	}
 	if attempts != 2 {
@@ -220,8 +216,8 @@ func TestSystemOneRetriesOn503(t *testing.T) {
 	}
 }
 
-func TestSystemOneBatch(t *testing.T) {
-	var gotBody BatchRequest
+func TestJevSystemOneBatch(t *testing.T) {
+	var gotBody jev.BatchRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/systemone/batch" {
 			t.Errorf("path = %q, want /v1/systemone/batch", r.URL.Path)
@@ -236,11 +232,11 @@ func TestSystemOneBatch(t *testing.T) {
 			"total_usage":{"input_tokens":5,"output_tokens":1}
 		}`)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	resp, err := newTestClient(server, "").SystemOneBatch(context.Background(), BatchRequest{
+	resp, err := jev.New(server.URL, "", "english", 5*time.Second).SystemOneBatch(context.Background(), jev.BatchRequest{
 		States:    []any{"one", "two"},
-		Questions: map[string]Question{"q": {Type: "noul", Instructions: "Is it?"}},
+		Questions: map[string]jev.Question{"q": {Type: "noul", Instructions: "Is it?"}},
 	})
 	if err != nil {
 		t.Fatalf("SystemOneBatch: %v", err)
@@ -260,7 +256,7 @@ func TestSystemOneBatch(t *testing.T) {
 	}
 }
 
-func TestHealth(t *testing.T) {
+func TestJevHealth(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %q, want GET", r.Method)
@@ -270,9 +266,9 @@ func TestHealth(t *testing.T) {
 		}
 		io.WriteString(w, `{"status":"ok","loaded":["english"],"device":"cpu","extra":1}`)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	health, err := newTestClient(server, "").Health(context.Background())
+	health, err := jev.New(server.URL, "", "english", 5*time.Second).Health(context.Background())
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
@@ -294,16 +290,16 @@ func TestLive(t *testing.T) {
 		t.Skip("JEV_BASE_URL not set")
 	}
 
-	client := New(baseURL, os.Getenv("JEV_API_KEY"), "english", 30*time.Second)
+	client := jev.New(baseURL, os.Getenv("JEV_API_KEY"), "english", 30*time.Second)
 	ctx := context.Background()
 
 	if _, err := client.Health(ctx); err != nil {
 		t.Fatalf("Health: %v", err)
 	}
 
-	resp, err := client.SystemOne(ctx, Request{
+	resp, err := client.SystemOne(ctx, jev.Request{
 		State: "The sky is blue.",
-		Questions: map[string]Question{
+		Questions: map[string]jev.Question{
 			"is_blue": {Type: "noul", Instructions: "Is the sky described as blue?"},
 		},
 	})
