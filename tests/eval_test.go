@@ -1,4 +1,4 @@
-package decide
+package tests
 
 import (
 	"context"
@@ -8,9 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"gavrh/sense/internal/decide"
 	"gavrh/sense/internal/jev"
 	"gavrh/sense/internal/serp"
 )
+
+// evalMaxOptions mirrors the Decider default so the BM25 baseline is compared on
+// the same candidate set the decider is given.
+const evalMaxOptions = 8
 
 // evalCase is one query and the URL substring a correct top-1 must contain.
 // Add real cases by appending {"query": "...", "expect_url": "..."} to testdata/eval.json.
@@ -27,14 +32,14 @@ func TestEvalAgainstBM25(t *testing.T) {
 		t.Skip("set SENSE_EVAL=1, SERP_URL and JEV_BASE_URL to run the eval")
 	}
 
-	cases := loadEval(t)
+	cases := loadEvalCases(t)
 	searcher, err := serp.New(serp.Options{Endpoint: serpURL})
 	if err != nil {
 		t.Fatalf("serp.New: %v", err)
 	}
 
 	model := os.Getenv("JEV_MODEL")
-	decider := New(jev.New(jevURL, os.Getenv("JEV_API_KEY"), model, 60*time.Second), Options{Model: model})
+	decider := decide.New(jev.New(jevURL, os.Getenv("JEV_API_KEY"), model, 60*time.Second), decide.Options{Model: model, MaxOptions: evalMaxOptions})
 
 	ctx := context.Background()
 	var bm25Hits, layaHits, scored int
@@ -50,10 +55,10 @@ func TestEvalAgainstBM25(t *testing.T) {
 			continue
 		}
 
-		top := Prefilter(tc.Query, results, 1)
+		top := decide.Prefilter(tc.Query, results, 1)
 		bm25Hit := strings.Contains(results[top[0]].URL, tc.ExpectURL)
 
-		subset := subsetBy(results, Prefilter(tc.Query, results, decider.maxOptions))
+		subset := subsetResults(results, decide.Prefilter(tc.Query, results, evalMaxOptions))
 		selection, err := decider.RankResults(ctx, tc.Query, subset)
 		if err != nil {
 			t.Errorf("%q: rank: %v", tc.Query, err)
@@ -85,7 +90,7 @@ func TestEvalAgainstBM25(t *testing.T) {
 	}
 }
 
-func loadEval(t *testing.T) []evalCase {
+func loadEvalCases(t *testing.T) []evalCase {
 	t.Helper()
 
 	data, err := os.ReadFile("testdata/eval.json")
@@ -100,7 +105,7 @@ func loadEval(t *testing.T) []evalCase {
 	return cases
 }
 
-func subsetBy(results []serp.Result, indices []int) []serp.Result {
+func subsetResults(results []serp.Result, indices []int) []serp.Result {
 	subset := make([]serp.Result, len(indices))
 	for i, index := range indices {
 		subset[i] = results[index]
