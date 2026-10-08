@@ -1,9 +1,7 @@
 package decide
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"unicode/utf8"
@@ -94,13 +92,13 @@ func (d *Decider) RankResults(ctx context.Context, query string, results []serp.
 	}
 
 	answer, ok := resp.Answers[answerKey]
-	if !ok || isNull(answer.Answer) {
+	if !ok || answer.Abstained() {
 		return abstained(0), nil
 	}
 
 	label, err := answer.AsString()
 	if err != nil {
-		return Selection{}, fmt.Errorf("decide: rank results: %w", err)
+		return abstained(confidenceOf(answer)), nil
 	}
 
 	index, ok := labels[label]
@@ -166,7 +164,7 @@ func (d *Decider) selectBatched(ctx context.Context, query string, states []any)
 		}
 
 		answer, ok := result.Answers[answerKey]
-		if !ok || isNull(answer.Answer) {
+		if !ok || answer.Abstained() {
 			continue
 		}
 		if relevant, err := answer.AsBool(); err != nil || !relevant {
@@ -222,10 +220,4 @@ func confidenceOf(answer jev.Answer) float64 {
 		return 0
 	}
 	return *answer.Confidence
-}
-
-// isNull detects a JSON null answer; AsString turns null into "" without an error.
-func isNull(raw json.RawMessage) bool {
-	trimmed := bytes.TrimSpace(raw)
-	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
 }

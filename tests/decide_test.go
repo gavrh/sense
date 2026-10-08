@@ -51,6 +51,23 @@ func decideCriteriaContains(req jev.Request, needle string) bool {
 	return false
 }
 
+func decideIndexForLabel(req jev.Request, label string, results []serp.Result) (int, bool) {
+	criteria, ok := req.Questions[decideAnswerKey].Criteria.(map[string]any)
+	if !ok {
+		return -1, false
+	}
+	description, ok := criteria[label].(string)
+	if !ok {
+		return -1, false
+	}
+	for i, result := range results {
+		if strings.Contains(description, result.Title) {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
 func TestDecideRankResults(t *testing.T) {
 	const query = "what is the capital of france"
 
@@ -73,7 +90,7 @@ func TestDecideRankResults(t *testing.T) {
 		if !ok {
 			t.Errorf("no criterion for Paris Guide")
 		}
-		fmt.Fprintf(w, `{"answers":{"answer":{"answer":%q,"confidence":0.9}}}`, label)
+		fmt.Fprintf(w, `{"answers":{"answer":{"type":"choice","choice":%q,"confidence":0.9}}}`, label)
 	}))
 	t.Cleanup(server.Close)
 
@@ -101,6 +118,60 @@ func TestDecideRankResults(t *testing.T) {
 	}
 }
 
+// TestDecideRankResultsActionChoice mirrors the schema drift bug report: the
+// action is an object and the chosen label lives in choice.
+func TestDecideRankResultsActionChoice(t *testing.T) {
+	results := []serp.Result{
+		{Title: "Britannica", URL: "https://britannica.example/france", Snippet: "France overview."},
+		{Title: "Paris Guide", URL: "https://example.com/paris", Snippet: "Everything about Paris."},
+	}
+
+	var got jev.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		io.WriteString(w, `{"answers":{"answer":{"type":"choice","choice":"c0","confidence":0.7933,"action":{"act_probability":1.0}}}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	selection, err := newDecideDecider(t, server, decide.Options{}).RankResults(context.Background(), "what is the capital of france", results)
+	if err != nil {
+		t.Fatalf("RankResults: %v", err)
+	}
+
+	wantIndex, ok := decideIndexForLabel(got, "c0", results)
+	if !ok {
+		t.Fatalf("no candidate labeled c0")
+	}
+	if selection.Index != wantIndex || selection.Abstained {
+		t.Errorf("selection = %+v, want index %d", selection, wantIndex)
+	}
+}
+
+func TestDecideSelectPassageNoulThreshold(t *testing.T) {
+	passages := []extract.Passage{
+		{Index: 0, Text: "Paris is the capital of France."},
+		{Index: 1, Text: "Water boils at 100C."},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"results":[
+			{"answers":{"answer":{"type":"noul","noul":0.51,"confidence":0.7}}},
+			{"answers":{"answer":{"type":"noul","noul":0.49,"confidence":0.99}}}
+		]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	selection, err := newDecideDecider(t, server, decide.Options{}).SelectPassage(context.Background(), "capital of france", passages)
+	if err != nil {
+		t.Fatalf("SelectPassage: %v", err)
+	}
+	if selection.Index != 0 || selection.Abstained {
+		t.Errorf("selection = %+v, want index 0", selection)
+	}
+}
+
 func TestDecideSelectPassage(t *testing.T) {
 	passages := []extract.Passage{
 		{Index: 0, Text: "The sky is blue."},
@@ -117,9 +188,9 @@ func TestDecideSelectPassage(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		io.WriteString(w, `{"results":[
-			{"answers":{"answer":{"answer":true,"confidence":0.4}}},
-			{"answers":{"answer":{"answer":true,"confidence":0.9}}},
-			{"answers":{"answer":{"answer":false,"confidence":0.99}}}
+			{"answers":{"answer":{"type":"noul","noul":0.6,"confidence":0.4}}},
+			{"answers":{"answer":{"type":"noul","noul":0.9,"confidence":0.9}}},
+			{"answers":{"answer":{"type":"noul","noul":0.1,"confidence":0.99}}}
 		]}`)
 	}))
 	t.Cleanup(server.Close)
@@ -152,9 +223,9 @@ func TestDecideSelectSentence(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"results":[
-			{"answers":{"answer":{"answer":false,"confidence":0.99}}},
-			{"answers":{"answer":{"answer":true,"confidence":0.7}}},
-			{"answers":{"answer":{"answer":true,"confidence":0.3}}}
+			{"answers":{"answer":{"type":"noul","noul":0.1,"confidence":0.99}}},
+			{"answers":{"answer":{"type":"noul","noul":0.66,"confidence":0.7}}},
+			{"answers":{"answer":{"type":"noul","noul":0.75,"confidence":0.3}}}
 		]}`)
 	}))
 	t.Cleanup(server.Close)
@@ -176,8 +247,9 @@ func TestDecideAbstains(t *testing.T) {
 		body    string
 		options decide.Options
 	}{
-		{"null answer", `{"answers":{"answer":{"answer":null,"confidence":0.9}}}`, decide.Options{}},
-		{"below floor", `{"answers":{"answer":{"answer":"c0","confidence":0.2}}}`, decide.Options{MinConfidence: 0.5}},
+		{"empty choice", `{"answers":{"answer":{"type":"choice","confidence":0.9}}}`, decide.Options{}},
+		{"abstained", `{"answers":{"answer":{"type":"choice","choice":"c0","confidence":0.9,"abstention":"abstained"}}}`, decide.Options{}},
+		{"below floor", `{"answers":{"answer":{"type":"choice","choice":"c0","confidence":0.2}}}`, decide.Options{MinConfidence: 0.5}},
 	}
 
 	for _, tc := range cases {

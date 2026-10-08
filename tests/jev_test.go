@@ -114,9 +114,9 @@ func TestJevResponseDecoding(t *testing.T) {
 		io.WriteString(w, `{
 			"model":"english",
 			"answers":{
-				"color":{"answer":"blue","confidence":0.91},
-				"is_blue":{"answer":true},
-				"score":{"answer":2,"answer_confidence":0.7}
+				"color":{"type":"choice","choice":"blue","probabilities":{"blue":0.91},"confidence":0.91,"action":{"act_probability":1.0}},
+				"is_blue":{"type":"noul","noul":0.87},
+				"score":{"type":"score","score":2,"answer_confidence":0.7}
 			},
 			"usage":{"input_tokens":10,"output_tokens":3},
 			"routing":{"model":"english","reason":"best fit"}
@@ -140,9 +140,9 @@ func TestJevResponseDecoding(t *testing.T) {
 	if err != nil || !isBlue {
 		t.Errorf("AsBool = %v, %v; want true, nil", isBlue, err)
 	}
-	score, err := resp.Answers["score"].AsInt()
-	if err != nil || score != 2 {
-		t.Errorf("AsInt = %d, %v; want 2, nil", score, err)
+	score := resp.Answers["score"].Score
+	if score == nil || *score != 2 {
+		t.Errorf("score = %v, want 2", score)
 	}
 
 	if got := resp.Answers["color"].Confidence; got == nil || *got != 0.91 {
@@ -227,7 +227,7 @@ func TestJevSystemOneBatch(t *testing.T) {
 		}
 		io.WriteString(w, `{
 			"results":[
-				{"model":"english","answers":{"q":{"answer":true}},"usage":{"input_tokens":5,"output_tokens":1}}
+				{"model":"english","answers":{"q":{"type":"noul","noul":0.9}},"usage":{"input_tokens":5,"output_tokens":1}}
 			],
 			"total_usage":{"input_tokens":5,"output_tokens":1}
 		}`)
@@ -312,6 +312,6 @@ func TestLive(t *testing.T) {
 		t.Fatalf("missing answer for is_blue, got %+v", resp.Answers)
 	}
 	if _, err := answer.AsBool(); err != nil {
-		t.Fatalf("answer not a bool: %v (%s)", err, answer.Answer)
+		t.Fatalf("answer not a noul: %v (%+v)", err, answer)
 	}
 }
