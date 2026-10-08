@@ -48,9 +48,16 @@
                     System One Search Engine
                 </p>
 
-                <form class="w-full flex" onsubmit="event.preventDefault(); this.reset(); console.log('submitting form');">
+                <form
+                    class="w-full flex"
+                    hx-post="/search"
+                    hx-target="#results"
+                    hx-swap="innerHTML"
+                    hx-indicator="#search-indicator"
+                >
                     <textarea 
                         rows="1" 
+                        name="q"
                         class="
                         min-w-full
                         max-w-full
@@ -65,12 +72,16 @@
                         placeholder="What do you want to know?"
                     ></textarea>
                     <button
+                        type="submit"
                         class="min-w-[25px] aspect-square bg-red-500"
-                        onclick="event.preventDefault(); this.form.requestSubmit();"
                     >
-                        test
+                        Search
                     </button>
                 </form>
+
+                <p id="search-indicator" class="htmx-indicator text-zinc-500">
+                    Searching...
+                </p>
             </div>
 
             <!-- results -->
