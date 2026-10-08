@@ -1,19 +1,18 @@
-package serp
+package tests
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
-	"testing/iotest"
 	"time"
+
+	"gavrh/sense/internal/serp"
 )
 
-func fixtureServer(t *testing.T) *httptest.Server {
+func newSerpFixtureServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	body, err := os.ReadFile("testdata/searxng.html")
@@ -30,17 +29,17 @@ func fixtureServer(t *testing.T) *httptest.Server {
 	return server
 }
 
-func newSearcher(t *testing.T, endpoint string, topN int) *Searcher {
+func newSerpSearcher(t *testing.T, endpoint string, topN int) *serp.Searcher {
 	t.Helper()
 
-	searcher, err := New(Options{Endpoint: endpoint, TopN: topN, Timeout: 5 * time.Second})
+	searcher, err := serp.New(serp.Options{Endpoint: endpoint, TopN: topN, Timeout: 5 * time.Second})
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("serp.New: %v", err)
 	}
 	return searcher
 }
 
-func TestSearchRequest(t *testing.T) {
+func TestSerpSearchRequest(t *testing.T) {
 	var (
 		gotMethod string
 		gotPath   string
@@ -56,11 +55,11 @@ func TestSearchRequest(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		io.WriteString(w, "<html></html>")
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	searcher, err := New(Options{Endpoint: server.URL, UserAgent: "sense-test/1.0"})
+	searcher, err := serp.New(serp.Options{Endpoint: server.URL, UserAgent: "sense-test/1.0"})
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("serp.New: %v", err)
 	}
 	if _, err := searcher.Search(context.Background(), "hello world"); err != nil {
 		t.Fatalf("Search: %v", err)
@@ -80,16 +79,16 @@ func TestSearchRequest(t *testing.T) {
 	}
 }
 
-func TestSearchParsesFixture(t *testing.T) {
-	server := fixtureServer(t)
-	searcher := newSearcher(t, server.URL, 10)
+func TestSerpSearchParsesFixture(t *testing.T) {
+	server := newSerpFixtureServer(t)
+	searcher := newSerpSearcher(t, server.URL, 10)
 
 	results, err := searcher.Search(context.Background(), "query")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 
-	want := []Result{
+	want := []serp.Result{
 		{Title: "First Result", URL: "https://example.com/first", Snippet: "The first snippet."},
 		{Title: "Relative Result", URL: server.URL + "/relative/page", Snippet: "The relative snippet."},
 		{Title: "Third Result", URL: "https://third.example.org/page", Snippet: "The third snippet."},
@@ -106,9 +105,9 @@ func TestSearchParsesFixture(t *testing.T) {
 	}
 }
 
-func TestSearchCapsTopN(t *testing.T) {
-	server := fixtureServer(t)
-	searcher := newSearcher(t, server.URL, 2)
+func TestSerpSearchCapsTopN(t *testing.T) {
+	server := newSerpFixtureServer(t)
+	searcher := newSerpSearcher(t, server.URL, 2)
 
 	results, err := searcher.Search(context.Background(), "query")
 	if err != nil {
@@ -123,7 +122,34 @@ func TestSearchCapsTopN(t *testing.T) {
 	}
 }
 
-func TestSearchErrors(t *testing.T) {
+// TestSerpSearchLegacyMarkup exercises the fallback selectors used by older
+// SearxNG result pages: div.result, a.url and .content.
+func TestSerpSearchLegacyMarkup(t *testing.T) {
+	const html = `<html><body>
+		<div class="result">
+			<a class="url" href="/legacy">Legacy Title</a>
+			<div class="content">Legacy snippet.</div>
+		</div>
+	</body></html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		io.WriteString(w, html)
+	}))
+	t.Cleanup(server.Close)
+
+	results, err := newSerpSearcher(t, server.URL, 10).Search(context.Background(), "query")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	want := serp.Result{Title: "Legacy Title", URL: server.URL + "/legacy", Snippet: "Legacy snippet."}
+	if len(results) != 1 || results[0] != want {
+		t.Errorf("results = %+v, want %+v", results, want)
+	}
+}
+
+func TestSerpSearchErrors(t *testing.T) {
 	cases := []struct {
 		name        string
 		status      int
@@ -140,43 +166,17 @@ func TestSearchErrors(t *testing.T) {
 				w.WriteHeader(tc.status)
 				io.WriteString(w, "{}")
 			}))
-			defer server.Close()
+			t.Cleanup(server.Close)
 
-			searcher := newSearcher(t, server.URL, 10)
-			if _, err := searcher.Search(context.Background(), "query"); err == nil {
+			if _, err := newSerpSearcher(t, server.URL, 10).Search(context.Background(), "query"); err == nil {
 				t.Fatal("Search succeeded, want error")
 			}
 		})
 	}
 }
 
-func TestNewRequiresEndpoint(t *testing.T) {
-	if _, err := New(Options{}); err == nil {
-		t.Fatal("New succeeded, want error")
-	}
-}
-
-func TestParseResultsFallbacks(t *testing.T) {
-	html := `<html><body>
-		<div class="result">
-			<a class="url" href="/legacy">Legacy Title</a>
-			<div class="content">Legacy snippet.</div>
-		</div>
-	</body></html>`
-
-	results, err := parseResults(strings.NewReader(html))
-	if err != nil {
-		t.Fatalf("parseResults: %v", err)
-	}
-
-	want := Result{Title: "Legacy Title", URL: "/legacy", Snippet: "Legacy snippet."}
-	if len(results) != 1 || results[0] != want {
-		t.Errorf("results = %+v, want %+v", results, want)
-	}
-}
-
-func TestParseResultsError(t *testing.T) {
-	if _, err := parseResults(iotest.ErrReader(errors.New("read failed"))); err == nil {
-		t.Fatal("parseResults succeeded, want error")
+func TestSerpNewRequiresEndpoint(t *testing.T) {
+	if _, err := serp.New(serp.Options{}); err == nil {
+		t.Fatal("serp.New succeeded, want error")
 	}
 }
