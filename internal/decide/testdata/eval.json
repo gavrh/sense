@@ -1,0 +1,7 @@
+[
+  {"query": "capital of france", "expect_url": "en.wikipedia.org/wiki/Paris"},
+  {"query": "go net http client timeout", "expect_url": "pkg.go.dev/net/http"},
+  {"query": "okapi bm25 ranking function", "expect_url": "en.wikipedia.org/wiki/Okapi_BM25"},
+  {"query": "difference between tcp and udp", "expect_url": "en.wikipedia.org/wiki/User_Datagram_Protocol"},
+  {"query": "reverse a string in python", "expect_url": "stackoverflow.com"}
+]
