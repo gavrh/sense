@@ -1,4 +1,4 @@
-package fetch
+package tests
 
 import (
 	"context"
@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gavrh/sense/internal/fetch"
 )
 
-func TestGetHTML(t *testing.T) {
+func TestFetchGet(t *testing.T) {
 	const body = "<html><body>hello</body></html>"
 
 	var gotUserAgent string
@@ -19,9 +21,9 @@ func TestGetHTML(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		io.WriteString(w, body)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	page, err := New(Options{UserAgent: "sense-test/1.0"}).Get(context.Background(), server.URL)
+	page, err := fetch.New(fetch.Options{UserAgent: "sense-test/1.0"}).Get(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -46,14 +48,14 @@ func TestGetHTML(t *testing.T) {
 	}
 }
 
-func TestGetRejectsBadResponses(t *testing.T) {
+func TestFetchGetRejectsBadResponses(t *testing.T) {
 	t.Run("non-2xx", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
-		defer server.Close()
+		t.Cleanup(server.Close)
 
-		_, err := New(Options{}).Get(context.Background(), server.URL)
+		_, err := fetch.New(fetch.Options{}).Get(context.Background(), server.URL)
 		if err == nil || !strings.Contains(err.Error(), "404") {
 			t.Fatalf("error = %v, want status 404", err)
 		}
@@ -64,57 +66,59 @@ func TestGetRejectsBadResponses(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			io.WriteString(w, `{}`)
 		}))
-		defer server.Close()
+		t.Cleanup(server.Close)
 
-		_, err := New(Options{}).Get(context.Background(), server.URL)
+		_, err := fetch.New(fetch.Options{}).Get(context.Background(), server.URL)
 		if err == nil || !strings.Contains(err.Error(), "application/json") {
 			t.Fatalf("error = %v, want unsupported content type", err)
 		}
 	})
 }
 
-func TestGetFollowsRedirects(t *testing.T) {
-	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, "<html><body>final</body></html>")
-	}))
-	defer final.Close()
+func TestFetchGetRedirects(t *testing.T) {
+	t.Run("follows redirect", func(t *testing.T) {
+		final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			io.WriteString(w, "<html><body>final</body></html>")
+		}))
+		t.Cleanup(final.Close)
 
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, final.URL, http.StatusFound)
-	}))
-	defer redirect.Close()
+		redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, final.URL, http.StatusFound)
+		}))
+		t.Cleanup(redirect.Close)
 
-	page, err := New(Options{MaxRedirects: 3}).Get(context.Background(), redirect.URL)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if page.URL != final.URL {
-		t.Errorf("URL = %q, want %q", page.URL, final.URL)
-	}
+		page, err := fetch.New(fetch.Options{MaxRedirects: 3}).Get(context.Background(), redirect.URL)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if page.URL != final.URL {
+			t.Errorf("URL = %q, want %q", page.URL, final.URL)
+		}
+	})
+
+	t.Run("caps redirects", func(t *testing.T) {
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, server.URL+"/next", http.StatusFound)
+		}))
+		t.Cleanup(server.Close)
+
+		_, err := fetch.New(fetch.Options{MaxRedirects: 2}).Get(context.Background(), server.URL)
+		if err == nil || !strings.Contains(err.Error(), "redirect") {
+			t.Fatalf("error = %v, want redirect limit error", err)
+		}
+	})
 }
 
-func TestGetRedirectCap(t *testing.T) {
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, server.URL+"/next", http.StatusFound)
-	}))
-	defer server.Close()
-
-	_, err := New(Options{MaxRedirects: 2}).Get(context.Background(), server.URL)
-	if err == nil || !strings.Contains(err.Error(), "redirect") {
-		t.Fatalf("error = %v, want redirect limit error", err)
-	}
-}
-
-func TestGetTruncatesBody(t *testing.T) {
+func TestFetchGetTruncatesBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		io.WriteString(w, strings.Repeat("a", 100))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	page, err := New(Options{MaxBytes: 10}).Get(context.Background(), server.URL)
+	page, err := fetch.New(fetch.Options{MaxBytes: 10}).Get(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -126,7 +130,7 @@ func TestGetTruncatesBody(t *testing.T) {
 	}
 }
 
-func TestGetRejectsNonHTTPSchemes(t *testing.T) {
+func TestFetchGetRejectsNonHTTPSchemes(t *testing.T) {
 	urls := []string{
 		"file:///etc/passwd",
 		"ftp://example.com/page",
@@ -134,21 +138,21 @@ func TestGetRejectsNonHTTPSchemes(t *testing.T) {
 	}
 
 	for _, rawURL := range urls {
-		if _, err := New(Options{}).Get(context.Background(), rawURL); err == nil {
+		if _, err := fetch.New(fetch.Options{}).Get(context.Background(), rawURL); err == nil {
 			t.Errorf("Get(%q) = nil error, want unsupported scheme", rawURL)
 		}
 	}
 }
 
-func TestGetThrottlesPerHost(t *testing.T) {
+func TestFetchThrottlesPerHost(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		io.WriteString(w, "<html><body>ok</body></html>")
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	const interval = 100 * time.Millisecond
-	fetcher := New(Options{MinHostInterval: interval})
+	fetcher := fetch.New(fetch.Options{MinHostInterval: interval})
 
 	start := time.Now()
 	for i := 0; i < 2; i++ {
