@@ -77,36 +77,35 @@ type BatchRequest struct {
 }
 
 type Answer struct {
-	// JSON type varies by question type; use the As* helpers to read it
-	Answer json.RawMessage `json:"answer"`
-
-	Confidence       *float64 `json:"confidence,omitempty"`
-	AnswerConfidence *float64 `json:"answer_confidence,omitempty"`
-	Action           string   `json:"action,omitempty"`
+	Type             string             `json:"type"`
+	Choice           string             `json:"choice,omitempty"`
+	Score            *float64           `json:"score,omitempty"`
+	Noul             *float64           `json:"noul,omitempty"`
+	Probabilities    map[string]float64 `json:"probabilities,omitempty"`
+	Legend           map[string]string  `json:"legend,omitempty"`
+	Confidence       *float64           `json:"confidence,omitempty"`
+	AnswerConfidence *float64           `json:"answer_confidence,omitempty"`
+	Action           json.RawMessage    `json:"action,omitempty"`
+	Abstention       string             `json:"abstention,omitempty"`
+	LowConfidence    *bool              `json:"low_confidence,omitempty"`
 }
 
 func (a Answer) AsString() (string, error) {
-	var value string
-	if err := json.Unmarshal(a.Answer, &value); err != nil {
-		return "", fmt.Errorf("jev: answer is not a string: %w", err)
+	if a.Choice == "" {
+		return "", errors.New("jev: answer has no choice")
 	}
-	return value, nil
+	return a.Choice, nil
 }
 
 func (a Answer) AsBool() (bool, error) {
-	var value bool
-	if err := json.Unmarshal(a.Answer, &value); err != nil {
-		return false, fmt.Errorf("jev: answer is not a bool: %w", err)
+	if a.Noul == nil {
+		return false, errors.New("jev: answer is not a noul")
 	}
-	return value, nil
+	return *a.Noul >= 0.5, nil
 }
 
-func (a Answer) AsInt() (int, error) {
-	var value int
-	if err := json.Unmarshal(a.Answer, &value); err != nil {
-		return 0, fmt.Errorf("jev: answer is not an int: %w", err)
-	}
-	return value, nil
+func (a Answer) Abstained() bool {
+return a.Abstention == "abstained" || (a.LowConfidence != nil && *a.LowConfidence)
 }
 
 type Usage struct {

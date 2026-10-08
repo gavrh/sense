@@ -34,6 +34,7 @@ func HandlePostSearch(runner SearchRunner) echo.HandlerFunc {
 		case errors.Is(err, search.ErrNoAnswer):
 			return renderMessage(c, http.StatusOK, "No answer found.")
 		case err != nil:
+			c.Logger().Error("search failed", "error", err)
 			return renderMessage(c, http.StatusBadGateway, "Search failed.")
 		}
 

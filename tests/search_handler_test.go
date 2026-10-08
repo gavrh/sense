@@ -1,8 +1,10 @@
 package tests
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -99,6 +101,26 @@ func TestHandleSearchFailure(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `class="message"`) {
 		t.Errorf("body is not a message fragment: %s", rec.Body.String())
+	}
+}
+
+func TestHandleSearchFailureLogsCause(t *testing.T) {
+	var logs bytes.Buffer
+
+	e := echo.New()
+	e.Renderer = templates.NewTemplate()
+	e.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	e.POST("/search", postHandlers.HandlePostSearch(&stubSearchRunner{err: errors.New("boom")}))
+
+	rec := postSearchForm(t, e, "query")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	if !strings.Contains(logs.String(), "search failed") {
+		t.Errorf("log missing message: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "boom") {
+		t.Errorf("log missing cause: %s", logs.String())
 	}
 }
 
