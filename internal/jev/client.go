@@ -105,7 +105,7 @@ func (a Answer) AsBool() (bool, error) {
 }
 
 func (a Answer) Abstained() bool {
-return a.Abstention == "abstained" || (a.LowConfidence != nil && *a.LowConfidence)
+	return a.Abstention == "abstained" || (a.LowConfidence != nil && *a.LowConfidence)
 }
 
 type Usage struct {
