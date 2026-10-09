@@ -1,0 +1,10 @@
+.git
+.gitignore
+.venv
+tmp
+.air.toml
+.vscode
+.idea
+*.swp
+*~
+.DS_Store
