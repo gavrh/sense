@@ -1,0 +1,37 @@
+services:
+  app:
+    build: .
+    ports:
+      - "2727:2727"
+    environment:
+      SERP_URL: http://searxng:8080
+      JEV_BASE_URL: ${JEV_BASE_URL:-http://host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - searxng
+
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "${SEARXNG_PORT:-8888}:8080"
+    configs:
+      - source: searxng_settings
+        target: /etc/searxng/settings.yml
+
+configs:
+  searxng_settings:
+    content: |
+      # Generate the secret key with: openssl rand -hex 32
+      use_default_settings: true
+
+      server:
+        secret_key: "please-change-this-secret-key"
+        bind_address: "0.0.0.0"
+        port: 8080
+        limiter: false
+        image_proxy: true
+
+      search:
+        formats:
+          - html
