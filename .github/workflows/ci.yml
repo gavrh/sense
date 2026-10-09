@@ -45,7 +45,7 @@ jobs:
         run: go vet ./...
 
       - name: Check formatting
-        shell: bash
+        if: runner.os == 'Linux'
         run: test -z "$(gofmt -l cmd handlers internal templates views tests)"
 
       - name: Test
