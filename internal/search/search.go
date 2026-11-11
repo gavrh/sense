@@ -170,6 +170,9 @@ func (p *Pipeline) Search(ctx context.Context, query string) (Result, error) {
 		return result, nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	return result, errors.Join(ErrSourcesUnavailable, errors.Join(failures...))
 }
 
