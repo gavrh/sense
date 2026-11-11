@@ -3,6 +3,8 @@
 **System One Search Engine**: retrieval-first question answering that uses fast, non-autoregressive
 decision models to pick the best source and the exact passage, then returns a short, cited answer
 
+<img width="100%" alt="sense-example" src="https://github.com/user-attachments/assets/468c3fee-d8d0-440d-8699-e972a8baecde" />
+
 ## How it works
 
 1. A query is submitted from the page
