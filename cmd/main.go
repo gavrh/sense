@@ -52,5 +52,5 @@ func newSearchRunner(cfg config.Config) (postHandlers.SearchRunner, error) {
 	fetcher := fetch.New(fetch.Options{Timeout: cfg.RequestTimeout})
 	decider := decide.New(client, decide.Options{Model: cfg.JevModel})
 
-	return search.New(searcher, fetcher, decider, search.Options{TopN: cfg.TopN}), nil
+	return search.New(searcher, fetcher, decider, search.Options{TopN: cfg.TopN, MaxAttempts: cfg.SearchAttempts}), nil
 }

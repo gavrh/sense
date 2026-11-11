@@ -149,6 +149,121 @@ func TestDecideRankResultsActionChoice(t *testing.T) {
 	}
 }
 
+func TestDecideRankedOrdersProbabilities(t *testing.T) {
+	const query = "what is the capital of france"
+
+	results := []serp.Result{
+		{Title: "Britannica", URL: "https://britannica.example/france", Snippet: "France overview."},
+		{Title: "Paris Guide", URL: "https://example.com/paris", Snippet: "Everything about Paris."},
+		{Title: "Weather", URL: "https://example.com/weather", Snippet: "Today's forecast."},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got jev.Request
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+
+		labels := make(map[string]string)
+		for _, title := range []string{"Britannica", "Paris Guide", "Weather"} {
+			label, ok := decideLabelFor(got, title)
+			if !ok {
+				t.Errorf("no criterion for %s", title)
+				return
+			}
+			labels[title] = label
+		}
+		fmt.Fprintf(w, `{"answers":{"answer":{"type":"choice","choice":%q,"confidence":0.5,"probabilities":{%q:0.2,%q:0.7,%q:0.1}}}}`,
+			labels["Paris Guide"], labels["Britannica"], labels["Paris Guide"], labels["Weather"])
+	}))
+	t.Cleanup(server.Close)
+
+	ranked, err := newDecideDecider(t, server, decide.Options{}).Ranked(context.Background(), query, results)
+	if err != nil {
+		t.Fatalf("Ranked: %v", err)
+	}
+
+	want := []struct {
+		index      int
+		confidence float64
+	}{
+		{index: 1, confidence: 0.7},
+		{index: 0, confidence: 0.2},
+		{index: 2, confidence: 0.1},
+	}
+	if len(ranked) != len(want) {
+		t.Fatalf("ranked = %+v, want %d entries", ranked, len(want))
+	}
+	for i, w := range want {
+		if ranked[i].Index != w.index || ranked[i].Confidence != w.confidence || ranked[i].Abstained {
+			t.Errorf("ranked[%d] = %+v, want index %d confidence %v", i, ranked[i], w.index, w.confidence)
+		}
+	}
+}
+
+func TestDecideRankedFallsBackToChoice(t *testing.T) {
+	results := []serp.Result{
+		{Title: "Britannica", URL: "https://britannica.example/france", Snippet: "France overview."},
+		{Title: "Paris Guide", URL: "https://example.com/paris", Snippet: "Everything about Paris."},
+	}
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"missing", `{"answers":{"answer":{"type":"choice","choice":%q,"confidence":0.73}}}`},
+		{"empty", `{"answers":{"answer":{"type":"choice","choice":%q,"confidence":0.73,"probabilities":{}}}}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var got jev.Request
+				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				label, ok := decideLabelFor(got, "Paris Guide")
+				if !ok {
+					t.Errorf("no criterion for Paris Guide")
+					return
+				}
+				fmt.Fprintf(w, tc.body, label)
+			}))
+			t.Cleanup(server.Close)
+
+			ranked, err := newDecideDecider(t, server, decide.Options{}).Ranked(context.Background(), "capital of france", results)
+			if err != nil {
+				t.Fatalf("Ranked: %v", err)
+			}
+			if len(ranked) != 1 {
+				t.Fatalf("ranked = %+v, want one selection", ranked)
+			}
+			if ranked[0].Index != 1 || ranked[0].Confidence != 0.73 || ranked[0].Abstained {
+				t.Errorf("ranked[0] = %+v, want index 1 confidence 0.73", ranked[0])
+			}
+		})
+	}
+}
+
+func TestDecideRankedAbstains(t *testing.T) {
+	results := []serp.Result{{Title: "Only", URL: "https://example.com", Snippet: "snippet"}}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"answers":{"answer":{"type":"choice","choice":"c0","confidence":0.9,"abstention":"abstained"}}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	ranked, err := newDecideDecider(t, server, decide.Options{}).Ranked(context.Background(), "query", results)
+	if err != nil {
+		t.Fatalf("Ranked: %v", err)
+	}
+	if len(ranked) != 0 {
+		t.Fatalf("ranked = %+v, want an empty list", ranked)
+	}
+}
+
 func TestDecideSelectPassageNoulThreshold(t *testing.T) {
 	passages := []extract.Passage{
 		{Index: 0, Text: "Paris is the capital of France."},

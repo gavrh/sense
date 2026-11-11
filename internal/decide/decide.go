@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"unicode/utf8"
 
 	"gavrh/sense/internal/extract"
@@ -56,20 +57,25 @@ func New(client *jev.Client, opts Options) *Decider {
 
 // RankResults picks the SERP result most likely to directly answer the query.
 func (d *Decider) RankResults(ctx context.Context, query string, results []serp.Result) (Selection, error) {
-	if len(results) == 0 {
+	ranked, err := d.Ranked(ctx, query, results)
+	if err != nil {
+		return Selection{}, err
+	}
+	if len(ranked) == 0 {
 		return abstained(0), nil
 	}
 
-	indices := candidateIndices(query, results, d.maxOptions)
-	labels := make(map[string]int, len(indices))
-	criteria := make(map[string]string, len(indices))
+	top := ranked[0]
+	return d.finish(top.Index, top.Confidence), nil
+}
 
-	// Shuffle so label position does not bias the model.
-	for position, k := range rand.Perm(len(indices)) {
-		label := fmt.Sprintf("c%d", position)
-		labels[label] = indices[k]
-		criteria[label] = summarize(results[indices[k]])
+// Ranked orders the candidates the model scored by probability, highest first.
+func (d *Decider) Ranked(ctx context.Context, query string, results []serp.Result) ([]Selection, error) {
+	if len(results) == 0 {
+		return nil, nil
 	}
+
+	labels, criteria := d.candidates(query, results)
 
 	req := jev.Request{
 		State: query,
@@ -88,24 +94,56 @@ func (d *Decider) RankResults(ctx context.Context, query string, results []serp.
 
 	resp, err := d.client.SystemOne(ctx, req)
 	if err != nil {
-		return Selection{}, fmt.Errorf("decide: rank results: %w", err)
+		return nil, fmt.Errorf("decide: rank results: %w", err)
 	}
 
 	answer, ok := resp.Answers[answerKey]
 	if !ok || answer.Abstained() {
-		return abstained(0), nil
+		return nil, nil
+	}
+
+	if len(answer.Probabilities) > 0 {
+		ranked := make([]Selection, 0, len(answer.Probabilities))
+		for label, probability := range answer.Probabilities {
+			index, ok := labels[label]
+			if !ok {
+				continue
+			}
+			ranked = append(ranked, Selection{Index: index, Confidence: probability})
+		}
+		sort.Slice(ranked, func(i, j int) bool {
+			if ranked[i].Confidence == ranked[j].Confidence {
+				return ranked[i].Index < ranked[j].Index
+			}
+			return ranked[i].Confidence > ranked[j].Confidence
+		})
+		return ranked, nil
 	}
 
 	label, err := answer.AsString()
 	if err != nil {
-		return abstained(confidenceOf(answer)), nil
+		return nil, nil
 	}
 
 	index, ok := labels[label]
 	if !ok {
-		return abstained(confidenceOf(answer)), nil
+		return nil, nil
 	}
-	return d.finish(index, confidenceOf(answer)), nil
+	return []Selection{{Index: index, Confidence: confidenceOf(answer)}}, nil
+}
+
+func (d *Decider) candidates(query string, results []serp.Result) (map[string]int, map[string]string) {
+	indices := candidateIndices(query, results, d.maxOptions)
+	labels := make(map[string]int, len(indices))
+	criteria := make(map[string]string, len(indices))
+
+	// Shuffle so label position does not bias the model.
+	for position, k := range rand.Perm(len(indices)) {
+		label := fmt.Sprintf("c%d", position)
+		labels[label] = indices[k]
+		criteria[label] = summarize(results[indices[k]])
+	}
+	return labels, criteria
 }
 
 // SelectPassage picks the passage most likely to contain the answer.

@@ -13,6 +13,7 @@ type Config struct {
 	JevModel       string
 	SerpURL        string
 	TopN           int
+	SearchAttempts int
 	RequestTimeout time.Duration
 }
 
@@ -24,6 +25,7 @@ func Load() Config {
 		JevModel:       getenv("JEV_MODEL", ""),
 		SerpURL:        getenv("SERP_URL", ""),
 		TopN:           getenvInt("TOP_N", 10),
+		SearchAttempts: getenvInt("SEARCH_ATTEMPTS", 3),
 		RequestTimeout: getenvDuration("REQUEST_TIMEOUT", 30*time.Second),
 	}
 }

@@ -44,8 +44,26 @@ func (f *searchFetcher) Get(ctx context.Context, rawURL string) (*fetch.Page, er
 	return f.page, nil
 }
 
+type searchURLFetcher struct {
+	pages map[string]*fetch.Page
+	errs  map[string]error
+	calls []string
+}
+
+func (f *searchURLFetcher) Get(ctx context.Context, rawURL string) (*fetch.Page, error) {
+	f.calls = append(f.calls, rawURL)
+	if err, ok := f.errs[rawURL]; ok {
+		return nil, err
+	}
+	page, ok := f.pages[rawURL]
+	if !ok {
+		return nil, errors.New("unexpected url: " + rawURL)
+	}
+	return page, nil
+}
+
 type searchDecider struct {
-	rank        decide.Selection
+	ranked      []decide.Selection
 	rankErr     error
 	passage     decide.Selection
 	passageErr  error
@@ -55,9 +73,9 @@ type searchDecider struct {
 	rankResults []serp.Result
 }
 
-func (d *searchDecider) RankResults(ctx context.Context, query string, results []serp.Result) (decide.Selection, error) {
+func (d *searchDecider) Ranked(ctx context.Context, query string, results []serp.Result) ([]decide.Selection, error) {
 	d.rankResults = results
-	return d.rank, d.rankErr
+	return d.ranked, d.rankErr
 }
 
 func (d *searchDecider) SelectPassage(ctx context.Context, query string, passages []extract.Passage) (decide.Selection, error) {
@@ -68,7 +86,7 @@ func (d *searchDecider) SelectSentence(ctx context.Context, query string, senten
 	return d.sentence, d.sentenceErr
 }
 
-func newSearchPipeline(searcher *searchSearcher, fetcher *searchFetcher, decider *searchDecider, opts search.Options) *search.Pipeline {
+func newSearchPipeline(searcher *searchSearcher, fetcher search.Fetcher, decider *searchDecider, opts search.Options) *search.Pipeline {
 	return search.New(searcher, fetcher, decider, opts)
 }
 
@@ -79,7 +97,7 @@ func TestSearchPipelineHappyPath(t *testing.T) {
 	}}
 	fetcher := &searchFetcher{page: &fetch.Page{URL: "https://two.example/final", Body: []byte(searchArticleHTML)}}
 	decider := &searchDecider{
-		rank:     decide.Selection{Index: 1, Confidence: 0.9},
+		ranked:   []decide.Selection{{Index: 1, Confidence: 0.9}},
 		passage:  decide.Selection{Index: 0, Confidence: 0.8},
 		sentence: decide.Selection{Index: 1, Confidence: 0.95},
 	}
@@ -116,7 +134,7 @@ func TestSearchPipelineNoResults(t *testing.T) {
 
 func TestSearchPipelineRankingAbstains(t *testing.T) {
 	searcher := &searchSearcher{results: []serp.Result{{Title: "Only", URL: "https://example.com"}}}
-	decider := &searchDecider{rank: decide.Selection{Index: -1, Abstained: true}}
+	decider := &searchDecider{}
 
 	result, err := newSearchPipeline(searcher, &searchFetcher{}, decider, search.Options{}).Search(context.Background(), "query")
 	if !errors.Is(err, search.ErrNoAnswer) {
@@ -131,21 +149,154 @@ func TestSearchPipelineFetchError(t *testing.T) {
 	fetchErr := errors.New("connection refused")
 	searcher := &searchSearcher{results: []serp.Result{{Title: "Only", URL: "https://example.com"}}}
 	fetcher := &searchFetcher{err: fetchErr}
-	decider := &searchDecider{rank: decide.Selection{Index: 0, Confidence: 0.9}}
+	decider := &searchDecider{ranked: []decide.Selection{{Index: 0, Confidence: 0.9}}}
 
 	_, err := newSearchPipeline(searcher, fetcher, decider, search.Options{}).Search(context.Background(), "query")
 	if !errors.Is(err, fetchErr) {
 		t.Fatalf("err = %v, want wrapped fetch error", err)
+	}
+	if !errors.Is(err, search.ErrSourcesUnavailable) {
+		t.Fatalf("err = %v, want ErrSourcesUnavailable", err)
+	}
+}
+
+func TestSearchPipelineFallsBackOnFetchError(t *testing.T) {
+	searcher := &searchSearcher{results: []serp.Result{
+		{Title: "First", URL: "https://one.example"},
+		{Title: "Second", URL: "https://two.example"},
+	}}
+	fetchErr := errors.New("bad status: 400")
+	fetcher := &searchURLFetcher{
+		pages: map[string]*fetch.Page{
+			"https://two.example": {URL: "https://two.example/final", Body: []byte(searchArticleHTML)},
+		},
+		errs: map[string]error{"https://one.example": fetchErr},
+	}
+	decider := &searchDecider{
+		ranked:   []decide.Selection{{Index: 0, Confidence: 0.9}, {Index: 1, Confidence: 0.8}},
+		passage:  decide.Selection{Index: 0, Confidence: 0.7},
+		sentence: decide.Selection{Index: 1, Confidence: 0.6},
+	}
+
+	result, err := newSearchPipeline(searcher, fetcher, decider, search.Options{}).Search(context.Background(), "capital of france")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if result.Answer != "Beta answer sentence." {
+		t.Errorf("answer = %q, want the second candidate's sentence", result.Answer)
+	}
+	if result.SourceTitle != "Second" || result.SourceURL != "https://two.example" {
+		t.Errorf("source = %q %q, want the second candidate", result.SourceTitle, result.SourceURL)
+	}
+	if len(fetcher.calls) != 2 {
+		t.Fatalf("fetch calls = %v, want two attempts", fetcher.calls)
+	}
+}
+
+func TestSearchPipelineFallsBackOnNoPassages(t *testing.T) {
+	searcher := &searchSearcher{results: []serp.Result{
+		{Title: "First", URL: "https://one.example"},
+		{Title: "Second", URL: "https://two.example"},
+	}}
+	fetcher := &searchURLFetcher{pages: map[string]*fetch.Page{
+		"https://one.example": {URL: "https://one.example", Body: []byte("<html><body></body></html>")},
+		"https://two.example": {URL: "https://two.example/final", Body: []byte(searchArticleHTML)},
+	}}
+	decider := &searchDecider{
+		ranked:   []decide.Selection{{Index: 0, Confidence: 0.9}, {Index: 1, Confidence: 0.8}},
+		passage:  decide.Selection{Index: 0, Confidence: 0.7},
+		sentence: decide.Selection{Index: 1, Confidence: 0.6},
+	}
+
+	result, err := newSearchPipeline(searcher, fetcher, decider, search.Options{}).Search(context.Background(), "capital of france")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if result.SourceTitle != "Second" || result.SourceURL != "https://two.example" {
+		t.Errorf("source = %q %q, want the second candidate", result.SourceTitle, result.SourceURL)
+	}
+	if len(fetcher.calls) != 2 {
+		t.Fatalf("fetch calls = %v, want two attempts", fetcher.calls)
+	}
+}
+
+func TestSearchPipelineAllSourcesUnavailable(t *testing.T) {
+	searcher := &searchSearcher{results: []serp.Result{
+		{Title: "First", URL: "https://one.example"},
+		{Title: "Second", URL: "https://two.example"},
+	}}
+	fetcher := &searchURLFetcher{errs: map[string]error{
+		"https://one.example": errors.New("status 400"),
+		"https://two.example": errors.New("not html"),
+	}}
+	decider := &searchDecider{ranked: []decide.Selection{
+		{Index: 0, Confidence: 0.9},
+		{Index: 1, Confidence: 0.8},
+	}}
+
+	result, err := newSearchPipeline(searcher, fetcher, decider, search.Options{}).Search(context.Background(), "query")
+	if !errors.Is(err, search.ErrSourcesUnavailable) {
+		t.Fatalf("err = %v, want ErrSourcesUnavailable", err)
+	}
+	if result.Query != "query" {
+		t.Errorf("query = %q, want query", result.Query)
+	}
+	if !strings.Contains(err.Error(), "status 400") || !strings.Contains(err.Error(), "not html") {
+		t.Errorf("error = %v, want both candidate causes", err)
+	}
+}
+
+func TestSearchPipelineMaxAttempts(t *testing.T) {
+	searcher := &searchSearcher{results: []serp.Result{
+		{Title: "One", URL: "https://one.example"},
+		{Title: "Two", URL: "https://two.example"},
+		{Title: "Three", URL: "https://three.example"},
+	}}
+	fetcher := &searchURLFetcher{errs: map[string]error{
+		"https://one.example":   errors.New("status 400"),
+		"https://two.example":   errors.New("status 403"),
+		"https://three.example": errors.New("not html"),
+	}}
+	decider := &searchDecider{ranked: []decide.Selection{
+		{Index: 0, Confidence: 0.9},
+		{Index: 1, Confidence: 0.8},
+		{Index: 2, Confidence: 0.7},
+	}}
+
+	_, err := newSearchPipeline(searcher, fetcher, decider, search.Options{MaxAttempts: 2}).Search(context.Background(), "query")
+	if !errors.Is(err, search.ErrSourcesUnavailable) {
+		t.Fatalf("err = %v, want ErrSourcesUnavailable", err)
+	}
+	if len(fetcher.calls) != 2 {
+		t.Fatalf("fetch calls = %v, want two attempts", fetcher.calls)
+	}
+}
+
+func TestSearchPipelineSelectionErrorPropagates(t *testing.T) {
+	searcher := &searchSearcher{results: []serp.Result{{Title: "Only", URL: "https://example.com"}}}
+	fetcher := &searchFetcher{page: &fetch.Page{URL: "https://example.com/final", Body: []byte(searchArticleHTML)}}
+	selectionErr := errors.New("jev unavailable")
+	decider := &searchDecider{
+		ranked:     []decide.Selection{{Index: 0, Confidence: 0.9}},
+		passageErr: selectionErr,
+	}
+
+	_, err := newSearchPipeline(searcher, fetcher, decider, search.Options{}).Search(context.Background(), "query")
+	if !errors.Is(err, selectionErr) {
+		t.Fatalf("err = %v, want the selection error", err)
+	}
+	if errors.Is(err, search.ErrSourcesUnavailable) {
+		t.Fatalf("err = %v, want a non-source failure", err)
 	}
 }
 
 func TestSearchPipelineNoPassages(t *testing.T) {
 	searcher := &searchSearcher{results: []serp.Result{{Title: "Only", URL: "https://example.com"}}}
 	fetcher := &searchFetcher{page: &fetch.Page{URL: "https://example.com", Body: []byte("<html><body></body></html>")}}
-	decider := &searchDecider{rank: decide.Selection{Index: 0, Confidence: 0.9}}
+	decider := &searchDecider{ranked: []decide.Selection{{Index: 0, Confidence: 0.9}}}
 
-	if _, err := newSearchPipeline(searcher, fetcher, decider, search.Options{}).Search(context.Background(), "query"); !errors.Is(err, search.ErrNoAnswer) {
-		t.Fatalf("err = %v, want ErrNoAnswer", err)
+	if _, err := newSearchPipeline(searcher, fetcher, decider, search.Options{}).Search(context.Background(), "query"); !errors.Is(err, search.ErrSourcesUnavailable) {
+		t.Fatalf("err = %v, want ErrSourcesUnavailable", err)
 	}
 }
 
@@ -154,7 +305,7 @@ func TestSearchPipelineFallbacks(t *testing.T) {
 		searcher := &searchSearcher{results: []serp.Result{{Title: "Only", URL: "https://example.com"}}}
 		fetcher := &searchFetcher{page: &fetch.Page{URL: "https://example.com", Body: []byte(searchArticleHTML)}}
 		decider := &searchDecider{
-			rank:     decide.Selection{Index: 0, Confidence: 0.9},
+			ranked:   []decide.Selection{{Index: 0, Confidence: 0.9}},
 			passage:  decide.Selection{Index: 0, Confidence: 0.6},
 			sentence: decide.Selection{Index: -1, Abstained: true},
 		}
@@ -175,7 +326,7 @@ func TestSearchPipelineFallbacks(t *testing.T) {
 		searcher := &searchSearcher{results: []serp.Result{{Title: "Only", URL: "https://example.com"}}}
 		fetcher := &searchFetcher{page: &fetch.Page{URL: "https://example.com", Body: []byte(searchArticleHTML)}}
 		decider := &searchDecider{
-			rank:     decide.Selection{Index: 0, Confidence: 0.9},
+			ranked:   []decide.Selection{{Index: 0, Confidence: 0.9}},
 			passage:  decide.Selection{Index: -1, Abstained: true},
 			sentence: decide.Selection{Index: 1, Confidence: 0.7},
 		}
@@ -207,7 +358,8 @@ func TestSearchPipelineCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := newSearchPipeline(searcher, &searchFetcher{}, &searchDecider{}, search.Options{}).Search(ctx, "query"); !errors.Is(err, context.Canceled) {
+	decider := &searchDecider{ranked: []decide.Selection{{Index: 0, Confidence: 0.9}}}
+	if _, err := newSearchPipeline(searcher, &searchFetcher{}, decider, search.Options{}).Search(ctx, "query"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
@@ -218,7 +370,7 @@ func TestSearchPipelineCapsResultsTopN(t *testing.T) {
 		{Title: "Two", URL: "https://two.example"},
 		{Title: "Three", URL: "https://three.example"},
 	}}
-	decider := &searchDecider{rank: decide.Selection{Index: -1, Abstained: true}}
+	decider := &searchDecider{}
 
 	_, err := newSearchPipeline(searcher, &searchFetcher{}, decider, search.Options{TopN: 2}).Search(context.Background(), "query")
 	if !errors.Is(err, search.ErrNoAnswer) {
