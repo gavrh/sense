@@ -1,6 +1,6 @@
 {{ block "result" . }}
-<div class="result">
+<div class="result rounded-md border border-zinc-200 p-4">
     <a class="font-semibold text-emerald-700 hover:underline" href="{{ .SourceURL }}">{{ .SourceTitle }}</a>
-    <p class="mt-2">{{ .Answer }}</p>
+    <p class="mt-2 text-zinc-800">{{ .Answer }}</p>
 </div>
 {{ end }}
