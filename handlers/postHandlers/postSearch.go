@@ -33,6 +33,9 @@ func HandlePostSearch(runner SearchRunner) echo.HandlerFunc {
 			return renderMessage(c, http.StatusOK, "No results found.")
 		case errors.Is(err, search.ErrNoAnswer):
 			return renderMessage(c, http.StatusOK, "No answer found.")
+		case errors.Is(err, search.ErrSourcesUnavailable):
+			c.Logger().Info("search sources unreadable", "error", err)
+			return renderMessage(c, http.StatusOK, "Couldn't read a relevant source.")
 		case err != nil:
 			c.Logger().Error("search failed", "error", err)
 			return renderMessage(c, http.StatusBadGateway, "Search failed.")

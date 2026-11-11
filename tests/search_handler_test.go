@@ -91,6 +91,36 @@ func TestHandleSearchNoResults(t *testing.T) {
 	}
 }
 
+func TestHandleSearchNoAnswer(t *testing.T) {
+	runner := &stubSearchRunner{err: search.ErrNoAnswer}
+
+	rec := postSearchForm(t, newSearchHandler(runner), "obscure query")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `class="message"`) {
+		t.Errorf("body is not a message fragment: %s", rec.Body.String())
+	}
+}
+
+func TestHandleSearchSourcesUnavailable(t *testing.T) {
+	runner := &stubSearchRunner{err: search.ErrSourcesUnavailable}
+
+	rec := postSearchForm(t, newSearchHandler(runner), "query")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="message"`) {
+		t.Errorf("body is not a message fragment: %s", body)
+	}
+	if !strings.Contains(body, "read a relevant source") {
+		t.Errorf("body missing the source message: %s", body)
+	}
+}
+
 func TestHandleSearchFailure(t *testing.T) {
 	runner := &stubSearchRunner{err: errors.New("boom")}
 
